@@ -10,6 +10,7 @@ export interface EvaluationItem {
   riskFunctionName: string;
   approved: boolean;
   value: any;
+  evaluation: string;
 }
 
 export const startRiskAssesment = (
@@ -49,8 +50,9 @@ function addEvaluation(
   func: (rau: RiskAssesmentUnit) => RiskAssesmentUnit,
   approved: boolean,
   value: any,
+  evaluation?: string,
 ): EvaluationItem {
-  return { riskFunctionName: func.name, approved, value };
+  return { riskFunctionName: func.name, approved, value, evaluation };
 }
 
 export function riskPipe(
@@ -67,9 +69,16 @@ export function RC001RiskScoreOB(input: RiskAssesmentUnit): RiskAssesmentUnit {
   const calificacionHibrido =
     input.openBankingResponse.applicants.primaryConsumer.output
       .CalificacionHibrido;
-  const approved = ['1', '2', '3'].includes(calificacionHibrido);
+
+  const approved = !['1', '2', '3', ''].includes(calificacionHibrido); //TODO check for numerical values
+
   input.evaluations.push(
-    addEvaluation(RC001RiskScoreOB, approved, calificacionHibrido),
+    addEvaluation(
+      RC001RiskScoreOB,
+      approved,
+      calificacionHibrido,
+      'Rejected if value in 1, 2, 3 or empty string',
+    ),
   );
   return input;
 }
@@ -77,6 +86,9 @@ export function RC001RiskScoreOB(input: RiskAssesmentUnit): RiskAssesmentUnit {
 export function RC002DebtOtherThanTelco(
   input: RiskAssesmentUnit,
 ): RiskAssesmentUnit {
+  const present =
+    input.openBankingResponse.applicants.primaryConsumer.dataSourceResponses
+      .EIPG.RISK.present;
   const totalUnpaidBalance =
     input.openBankingResponse.applicants.primaryConsumer.dataSourceResponses
       .EIPG.RISK.araAttributes.totalUnpaidBalance;
@@ -84,37 +96,49 @@ export function RC002DebtOtherThanTelco(
     input.openBankingResponse.applicants.primaryConsumer.dataSourceResponses
       .EIPG.RISK.araAttributes.unpaidBalanceOfTelco;
 
-  const approved =
-    input.openBankingResponse.applicants.primaryConsumer.dataSourceResponses
-      .EIPG.RISK.present === '00' &&
-    totalUnpaidBalance - unpaidBalanceOfTelco > 0;
+  const approved = !(
+    present === '00' && totalUnpaidBalance - unpaidBalanceOfTelco > 0
+  );
+
   input.evaluations.push(
-    addEvaluation(RC002DebtOtherThanTelco, approved, {
-      present:
-        input.openBankingResponse.applicants.primaryConsumer.dataSourceResponses
-          .EIPG.RISK.present,
-      totalUnpaidBalance,
-      unpaidBalanceOfTelco,
-    }),
+    addEvaluation(
+      RC002DebtOtherThanTelco,
+      approved,
+      {
+        present:
+          input.openBankingResponse.applicants.primaryConsumer
+            .dataSourceResponses.EIPG.RISK.present,
+        totalUnpaidBalance,
+        unpaidBalanceOfTelco,
+      },
+      'if present is equals to 00 and totalUnpaidBalance - unpaidBalanceOfTelco > 0 its rejected',
+    ),
   );
   return input;
 }
 
 export function RC003TelcoDebt(input: RiskAssesmentUnit): RiskAssesmentUnit {
+  const present =
+    input.openBankingResponse.applicants.primaryConsumer.dataSourceResponses
+      .EIPG.RISK.present; //Banking reports
   const unpaidBalanceOfTelco =
     input.openBankingResponse.applicants.primaryConsumer.dataSourceResponses
       .EIPG.RISK.araAttributes.unpaidBalanceOfTelco;
 
-  const approved =
-    input.openBankingResponse.applicants.primaryConsumer.dataSourceResponses
-      .EIPG.RISK.present === '00' && unpaidBalanceOfTelco > 80;
+  const approved = !(present === '00' && unpaidBalanceOfTelco > 80); //TODO check for numeric values
+
   input.evaluations.push(
-    addEvaluation(RC003TelcoDebt, approved, {
-      present:
-        input.openBankingResponse.applicants.primaryConsumer.dataSourceResponses
-          .EIPG.RISK.present,
-      unpaidBalanceOfTelco,
-    }),
+    addEvaluation(
+      RC003TelcoDebt,
+      approved,
+      {
+        present:
+          input.openBankingResponse.applicants.primaryConsumer
+            .dataSourceResponses.EIPG.RISK.present,
+        unpaidBalanceOfTelco,
+      },
+      '',
+    ),
   );
   return input;
 }
@@ -125,9 +149,33 @@ export function RC004DaysOfWorstSituation(
   const numberOfDaysOfWorstSituation =
     input.openBankingResponse.applicants.primaryConsumer.dataSourceResponses
       .EIPG.RISK.araAttributes.numberOfDaysOfWorstSituation;
-  if (numberOfDaysOfWorstSituation < 60) {
-    input.stops += 1;
-  }
+  const approved = numberOfDaysOfWorstSituation < 60;
+  input.evaluations.push(
+    addEvaluation(RC004DaysOfWorstSituation, approved, {
+      numberOfDaysOfWorstSituation,
+      minDays: 60,
+    }),
+  );
+  return input;
+}
+
+export function RC005MonthsAvailable(
+  input: RiskAssesmentUnit,
+): RiskAssesmentUnit {
+  const totalWholeMonthsOfTransactions =
+    input.openBankingResponse.applicants.primaryConsumer.dataSourceResponses
+      .BANKINGREPORTS.BANKINGREPORTS.Report.additionalData
+      .aggregatedAccountReport.aggregatedActivityReport
+      .totalWholeMonthsOfTransactions;
+
+  const approved = totalWholeMonthsOfTransactions >= 6;
+
+  input.evaluations.push(
+    addEvaluation(RC005MonthsAvailable, approved, {
+      totalWholeMonthsOfTransactions,
+      months: 6,
+    }),
+  );
   return input;
 }
 
@@ -139,13 +187,19 @@ export function RC006MonthlyTransactions(
       .BANKINGREPORTS.BANKINGREPORTS.Report.openBankingInsights.accountActivity
       .daysOfTrns;
   const totalWholeMonthsOfTransactions =
-    input.openBankingResponse.applicants.primaryConsumer.dataSourceResponses.BANKINGREPORTS.BANKINGREPORTS.Report.accountReportList.reduce(
-      (acc, curr) => acc + curr.wholeMonthsAvailable,
-      0,
-    );
-  if (daysOfTrns / totalWholeMonthsOfTransactions < 10) {
-    input.stops += 1;
-  }
+    input.openBankingResponse.applicants.primaryConsumer.dataSourceResponses
+      .BANKINGREPORTS.BANKINGREPORTS.Report.additionalData
+      .aggregatedAccountReport.aggregatedActivityReport
+      .totalWholeMonthsOfTransactions;
+
+  const approved = daysOfTrns / totalWholeMonthsOfTransactions >= 10;
+  input.evaluations.push(
+    addEvaluation(RC006MonthlyTransactions, approved, {
+      daysOfTrns,
+      totalWholeMonthsOfTransactions,
+      transactionsMedia: 10,
+    }),
+  );
   return input;
 }
 
@@ -165,21 +219,36 @@ export function RC007CashflowPaymentCapacity(
     input.openBankingResponse.applicants.primaryConsumer.dataSourceResponses
       .BANKINGREPORTS.BANKINGREPORTS.Report.openBankingInsights.accountOverview
       .numAccounts;
-  const loanQuota = 0;
-  const netCashFlow =
-    (totalCashFlowIncoming6M - totalCashFlowOutcoming6M - loanQuota) /
-    numAccounts;
-  if (netCashFlow < 50) {
-    input.stops += 1;
-  }
+
+  const loanQuota = 0; //TODO Importe total (más intereses)
+
+  const approved =
+    totalCashFlowIncoming6M * numAccounts -
+      totalCashFlowOutcoming6M * numAccounts +
+      loanQuota >=
+    50;
+
+  input.evaluations.push(
+    addEvaluation(RC007CashflowPaymentCapacity, approved, {
+      totalCashFlowIncoming6M,
+      totalCashFlowOutcoming6M,
+      numAccounts,
+      amount: 50,
+    }),
+  );
   return input;
 }
 
 export function RC008LastBalance(input: RiskAssesmentUnit): RiskAssesmentUnit {
-  const lastBalance = 0;
-  if (lastBalance < 0) {
-    input.stops += 1;
-  }
+  const lastBalance =
+    input.openBankingResponse.applicants.primaryConsumer.dataSourceResponses
+      .BANKINGREPORTS.BANKINGREPORTS.Report.openBankingInsights.balances
+      .lastBalance;
+
+  const approved = lastBalance >= 0;
+  input.evaluations.push(
+    addEvaluation(RC008LastBalance, approved, { lastBalance, amount: 0 }),
+  );
   return input;
 }
 
@@ -190,9 +259,14 @@ export function RC009IncomeVerification(
     input.openBankingResponse.applicants.primaryConsumer.dataSourceResponses
       .BANKINGREPORTS.BANKINGREPORTS.Report.incomeVerification.primaryIncome
       .meanTimeBetweenPayments;
-  if (meanTimeBetweenPayments === 0) {
-    input.stops += 1;
-  }
+
+  const approved = meanTimeBetweenPayments > 15 && meanTimeBetweenPayments < 40; //Semáforo
+
+  input.evaluations.push(
+    addEvaluation(RC009IncomeVerification, approved, {
+      meanTimeBetweenPayments,
+    }),
+  );
   return input;
 }
 
@@ -207,43 +281,190 @@ export function RC010MinimumBalances(
     input.openBankingResponse.applicants.primaryConsumer.dataSourceResponses
       .BANKINGREPORTS.BANKINGREPORTS.Report.openBankingInsights.overdrafts
       .numDaysInOverdraft6M;
-  const SumLoans6M =
+
+  const firstCondition = numDaysInOverdraft1M / (numDaysInOverdraft6M / 6) > 2;
+  const secondCondition = numDaysInOverdraft1M > 6;
+
+  const approved = !(firstCondition && secondCondition);
+
+  input.evaluations.push(
+    addEvaluation(RC010MinimumBalances, approved, {
+      numDaysInOverdraft1M,
+      numDaysInOverdraft6M,
+    }),
+  );
+
+  return input;
+}
+
+export function RC011(input: RiskAssesmentUnit): RiskAssesmentUnit {
+  const sumLoans1M =
+    input.openBankingResponse.applicants.primaryConsumer.dataSourceResponses
+      .BANKINGREPORTS.BANKINGREPORTS.Report.openBankingInsights.loans
+      .sumLoans1M;
+  const sumLoans6M =
     input.openBankingResponse.applicants.primaryConsumer.dataSourceResponses
       .BANKINGREPORTS.BANKINGREPORTS.Report.openBankingInsights.loans
       .sumLoans6M;
-  const SumLoans12M =
+  const sumLoans12M =
     input.openBankingResponse.applicants.primaryConsumer.dataSourceResponses
       .BANKINGREPORTS.BANKINGREPORTS.Report.openBankingInsights.loans
       .sumLoans12M;
-  const overdraftRatio = numDaysInOverdraft1M / numDaysInOverdraft6M;
-  const loanGrowth = SumLoans6M >= SumLoans12M;
 
-  if (overdraftRatio > 2 || numDaysInOverdraft1M > 6 || loanGrowth) {
-    input.stops += 1;
-  }
+  const firstCondition = sumLoans1M >= sumLoans6M;
+  const secondCondition = sumLoans1M >= sumLoans12M;
+
+  const approved = !(firstCondition || secondCondition);
+
+  input.evaluations.push(
+    addEvaluation(RC011, approved, { sumLoans1M, sumLoans6M, sumLoans12M }),
+  );
+  return input;
+}
+
+export function RC012(input: RiskAssesmentUnit): RiskAssesmentUnit {
+  const sumLoans1M =
+    input.openBankingResponse.applicants.primaryConsumer.dataSourceResponses
+      .BANKINGREPORTS.BANKINGREPORTS.Report.openBankingInsights.loans
+      .sumLoans1M;
+
+  const approved = sumLoans1M <= 2;
+  input.evaluations.push(addEvaluation(RC012, approved, { sumLoans1M }));
+  return input;
+}
+
+export function RC013(input: RiskAssesmentUnit): RiskAssesmentUnit {
+  const totalCashFlowIncoming1M =
+    input.openBankingResponse.applicants.primaryConsumer.dataSourceResponses
+      .BANKINGREPORTS.BANKINGREPORTS.Report.additionalData
+      .aggregatedAccountReport.aggregatedActivityReport.totalCashFlowIncoming1M;
+
+  const numAccounts =
+    input.openBankingResponse.applicants.primaryConsumer.dataSourceResponses
+      .BANKINGREPORTS.BANKINGREPORTS.Report.openBankingInsights.accountOverview
+      .numAccounts;
+  const totalCashFlowOutcoming1M =
+    input.openBankingResponse.applicants.primaryConsumer.dataSourceResponses
+      .BANKINGREPORTS.BANKINGREPORTS.Report.additionalData
+      .aggregatedAccountReport.aggregatedActivityReport
+      .totalCashFlowOutcoming1M;
+
+  const loanFee = 500; //TODO read from actual load, importe_total.
+
+  const approved = !(
+    totalCashFlowIncoming1M * numAccounts -
+      totalCashFlowOutcoming1M * numAccounts +
+      loanFee <
+    50
+  );
+
+  input.evaluations.push(
+    addEvaluation(RC013, approved, {
+      totalCashFlowIncoming1M,
+      numAccounts,
+      totalCashFlowOutcoming6M: totalCashFlowOutcoming1M,
+    }),
+  );
   return input;
 }
 
 export function RC014PaydayLoan(input: RiskAssesmentUnit): RiskAssesmentUnit {
-  const totalCashFlowIncoming1M =
+  const totalCashFlowIncoming6M =
     input.openBankingResponse.applicants.primaryConsumer.dataSourceResponses
       .BANKINGREPORTS.BANKINGREPORTS.Report.additionalData
       .aggregatedAccountReport.aggregatedActivityReport.totalCashFlowIncoming6M;
+  const totalCashFlowIncoming5M =
+    input.openBankingResponse.applicants.primaryConsumer.dataSourceResponses
+      .BANKINGREPORTS.BANKINGREPORTS.Report.additionalData
+      .aggregatedAccountReport.aggregatedActivityReport.totalCashFlowIncoming5M;
+
+  const totalCashFlowIncoming4M =
+    input.openBankingResponse.applicants.primaryConsumer.dataSourceResponses
+      .BANKINGREPORTS.BANKINGREPORTS.Report.additionalData
+      .aggregatedAccountReport.aggregatedActivityReport.totalCashFlowIncoming4M;
+
+  const totalCashFlowIncoming1M =
+    input.openBankingResponse.applicants.primaryConsumer.dataSourceResponses
+      .BANKINGREPORTS.BANKINGREPORTS.Report.additionalData
+      .aggregatedAccountReport.aggregatedActivityReport.totalCashFlowIncoming1M;
+
   const totalCashFlowOutcoming6M =
     input.openBankingResponse.applicants.primaryConsumer.dataSourceResponses
       .BANKINGREPORTS.BANKINGREPORTS.Report.additionalData
       .aggregatedAccountReport.aggregatedActivityReport
       .totalCashFlowOutcoming6M;
+  const totalCashFlowOutcoming5M =
+    input.openBankingResponse.applicants.primaryConsumer.dataSourceResponses
+      .BANKINGREPORTS.BANKINGREPORTS.Report.additionalData
+      .aggregatedAccountReport.aggregatedActivityReport
+      .totalCashFlowOutcoming5M;
+
+  const totalCashFlowOutcoming4M =
+    input.openBankingResponse.applicants.primaryConsumer.dataSourceResponses
+      .BANKINGREPORTS.BANKINGREPORTS.Report.additionalData
+      .aggregatedAccountReport.aggregatedActivityReport
+      .totalCashFlowOutcoming4M;
+
+  const totalAverageCashFlowIncoming3M =
+    input.openBankingResponse.applicants.primaryConsumer.dataSourceResponses
+      .BANKINGREPORTS.BANKINGREPORTS.Report.additionalData
+      .aggregatedAccountReport.aggregatedActivityReport
+      .totalAverageCashFlowIncoming3M;
+
+  const totalAverageCashFlowOutcoming3M =
+    input.openBankingResponse.applicants.primaryConsumer.dataSourceResponses
+      .BANKINGREPORTS.BANKINGREPORTS.Report.additionalData
+      .aggregatedAccountReport.aggregatedActivityReport
+      .totalAverageCashFlowOutcoming3M;
+
+  const totalCashFlowOutcoming1M =
+    input.openBankingResponse.applicants.primaryConsumer.dataSourceResponses
+      .BANKINGREPORTS.BANKINGREPORTS.Report.additionalData
+      .aggregatedAccountReport.aggregatedActivityReport
+      .totalCashFlowOutcoming1M;
+
   const numAccounts =
     input.openBankingResponse.applicants.primaryConsumer.dataSourceResponses
       .BANKINGREPORTS.BANKINGREPORTS.Report.openBankingInsights.accountOverview
       .numAccounts;
-  const loanQuota = 0;
-  const netCashFlow =
-    (totalCashFlowIncoming1M - totalCashFlowOutcoming6M - loanQuota) /
-    numAccounts;
-  if (netCashFlow < 50) {
-    input.stops += 1;
-  }
+
+  const loanFee = 0; //TODO importe_total;
+
+  const a =
+    (totalCashFlowIncoming6M +
+      totalCashFlowIncoming4M +
+      totalCashFlowIncoming5M -
+      totalCashFlowOutcoming6M -
+      totalCashFlowOutcoming5M -
+      totalCashFlowOutcoming4M) /
+    3;
+
+  const b =
+    totalAverageCashFlowIncoming3M -
+    totalAverageCashFlowOutcoming3M * numAccounts;
+
+  const approved =
+    a < b &&
+    totalCashFlowIncoming1M - totalCashFlowOutcoming1M - loanFee > 50 * (a / b);
+
+  input.evaluations.push(
+    addEvaluation(RC014PaydayLoan, approved, {
+      totalCashFlowIncoming6M,
+      totalCashFlowIncoming5M,
+      totalCashFlowIncoming4M,
+      totalCashFlowIncoming1M,
+      totalCashFlowOutcoming6M,
+      totalCashFlowOutcoming5M,
+      totalCashFlowOutcoming4M,
+      totalAverageCashFlowIncoming3M,
+      totalAverageCashFlowOutcoming3M,
+      totalCashFlowOutcoming1M,
+      numAccounts,
+      loanFee,
+      a,
+      b,
+    }),
+  );
+
   return input;
 }

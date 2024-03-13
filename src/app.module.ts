@@ -18,6 +18,10 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
       inject: [ConfigService],
       useFactory: (config: ConfigService) => {
         console.log('CONFIG', config.get('DATABASE_HOST'));
+        console.log('CONFIG', config.get('DATABASE_PORT'));
+        console.log('CONFIG', config.get('DATABASE_USER'));
+        console.log('CONFIG', config.get('DATABASE_PASSWORD'));
+        console.log('CONFIG', config.get('DATABASE_NAME'));
         return {
           type: 'mysql',
           host: config.get('DATABASE_HOST'),
