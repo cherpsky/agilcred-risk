@@ -6,6 +6,7 @@ export interface RootResponse {
   transactionState: string;
   interactionId: string;
   transactionId: number;
+  importe_total?: number;
 }
 
 export interface Applicants {

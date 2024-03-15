@@ -1,12 +1,12 @@
 import { Module } from '@nestjs/common';
-import { AppController } from './app.controller';
-import { AppService } from './app.service';
 import { RiskEvaluationController } from './risk-evaluation/risk-evaluation.controller';
 import { RiskEvaluationService } from './risk-evaluation/risk-evaluation.service';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { LogServiceEntity } from 'data/entities/remote/log-service.entity';
 import { LogService } from 'services/log.service';
 import { ConfigModule, ConfigService } from '@nestjs/config';
+import { Solicitud } from 'data/entities/remote/solicitud.entity';
+import { SolicitudService } from 'services/solicitud.service';
 
 @Module({
   imports: [
@@ -24,14 +24,14 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
           username: config.get('DATABASE_USER'),
           password: config.get('DATABASE_PASSWORD'),
           database: config.get('DATABASE_NAME'),
-          entities: [LogServiceEntity],
+          entities: [LogServiceEntity, Solicitud],
           synchronize: false,
         };
       },
     }),
-    TypeOrmModule.forFeature([LogServiceEntity]),
+    TypeOrmModule.forFeature([LogServiceEntity, Solicitud]),
   ],
-  controllers: [AppController, RiskEvaluationController],
-  providers: [AppService, RiskEvaluationService, LogService],
+  controllers: [RiskEvaluationController],
+  providers: [RiskEvaluationService, LogService, SolicitudService],
 })
 export class AppModule {}
