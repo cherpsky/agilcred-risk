@@ -11,24 +11,35 @@ export class RiskEvaluationController {
     @Param('requestId', ParseIntPipe) requestId: number,
     @Query('type') type?: string,
   ): Promise<any> {
-    if (type === 'short') {
-      const res = await this.riskEvaluation.getCreditRequestAssesment(
-        userId,
-        requestId,
-      );
+    const assesment = await this.riskEvaluation.getCreditRequestAssesment(
+      userId,
+      requestId,
+    );
+    const rejectedConditions = assesment.evaluations.filter(
+      (evaluation) => !evaluation.approved && !evaluation.stop,
+    );
 
-      const rejectedConditions = res.evaluations.filter(
-        (evaluation) => !evaluation.approved && !evaluation.stop,
-      );
+    const stopConditions = assesment.evaluations.filter(
+      (evaluation) => evaluation.stop === true,
+    );
 
-      const approved = res.stops <= 0 && rejectedConditions.length === 0;
+    const approved = assesment.stops <= 2 && rejectedConditions.length === 0;
 
+    if (type === 'agil') {
+      return {
+        status: 'ok',
+        data: null,
+        result: approved ? 'approved' : 'rejected',
+        next_step: null,
+      };
+    } else if (type === 'short') {
       return {
         approved,
-        stops: res.stops,
+        stops: assesment.stops,
         rejectedConditions,
+        stopConditions,
       };
     }
-    return this.riskEvaluation.getCreditRequestAssesment(userId, requestId);
+    return assesment;
   }
 }
